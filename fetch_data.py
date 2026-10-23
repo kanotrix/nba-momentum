@@ -1,10 +1,11 @@
 """Download game logs and save to data/. Run daily by GitHub Actions."""
-import sys, time
+import os, sys, time
 from datetime import datetime, timedelta, timezone
 import pandas as pd
 from nba_api.stats.endpoints import leaguegamelog
 
 SEASONS = sys.argv[1:] or ["2026-27", "2025-26"]
+os.makedirs("data", exist_ok=True)
 IST = timezone(timedelta(hours=5, minutes=30))
 
 for season in SEASONS:
