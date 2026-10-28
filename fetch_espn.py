@@ -1,5 +1,5 @@
 """Daily NBA update from ESPN's public feed (works from GitHub's servers).
-Adds finished regular-season games (points + shooting) to data/games_<season>.csv.
+Adds finished regular-season games (points, shooting, defense) to data/games_<season>.csv.
 Usage: python fetch_espn.py                      (updates 2026-27)
        python fetch_espn.py 2026-27 2026-10-20   (season, first date to scan)
 """
@@ -15,7 +15,7 @@ BOARD = "https://site.api.espn.com/apis/site/v2/sports/basketball/nba/scoreboard
 SUMMARY = "https://site.web.api.espn.com/apis/site/v2/sports/basketball/nba/summary"
 ET, IST = ZoneInfo("America/New_York"), timezone(timedelta(hours=5, minutes=30))
 FIX = {"GS": "GSW", "NO": "NOP", "NY": "NYK", "SA": "SAS", "UTAH": "UTA", "WSH": "WAS"}
-SHOOT = ["FGM", "FGA", "FG3M", "FG3A", "FTM", "FTA"]
+SHOOT = ["FGM", "FGA", "FG3M", "FG3A", "FTM", "FTA", "STL", "BLK", "DREB", "TOV"]
 
 os.makedirs("data", exist_ok=True)
 path = f"data/games_{SEASON}.csv"
@@ -26,8 +26,8 @@ start = START
 if not old.empty:
     last = pd.to_datetime(old["GAME_DATE"]).max().date()
     start = max(START, last - timedelta(days=3))
-    if "FGA" in old.columns:
-        missing = old[old["FGA"].isna()]
+    if all(c in old.columns for c in ("FGA", "STL")):
+        missing = old[old["FGA"].isna() | old["STL"].isna()]
         if not missing.empty:
             start = min(start, pd.to_datetime(missing["GAME_DATE"]).min().date())
     else:
@@ -56,6 +56,13 @@ def split(v):
         return None, None
 
 
+def num(v):
+    try:
+        return float(v)
+    except Exception:
+        return None
+
+
 def boxscore(event_id):
     """Return {ESPN abbreviation: {FGM, FGA, FG3M, FG3A, FTM, FTA}} for one game."""
     data = get(SUMMARY, {"event": event_id})
@@ -70,6 +77,14 @@ def boxscore(event_id):
                 vals["FG3M"], vals["FG3A"] = split(s.get("displayValue"))
             elif name.startswith("freeThrowsMade") or label == "FT":
                 vals["FTM"], vals["FTA"] = split(s.get("displayValue"))
+            elif name == "steals" or label == "STL":
+                vals["STL"] = num(s.get("displayValue"))
+            elif name == "blocks" or label == "BLK":
+                vals["BLK"] = num(s.get("displayValue"))
+            elif name == "defensiveRebounds" or label == "DREB":
+                vals["DREB"] = num(s.get("displayValue"))
+            elif name in ("turnovers", "totalTurnovers") or label in ("TO", "TOV"):
+                vals.setdefault("TOV", num(s.get("displayValue")))
         out[t["team"]["abbreviation"]] = vals
     return out
 
