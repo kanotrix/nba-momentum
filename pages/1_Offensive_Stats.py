@@ -1,3 +1,4 @@
+
 from pathlib import Path
 
 import pandas as pd
@@ -7,6 +8,9 @@ import streamlit as st
 st.set_page_config(page_title="NBA Offensive Stats", layout="wide")
 st.title("🏀 NBA Offensive Stats")
 st.caption("Cumulative scoring and shooting totals for every team.")
+
+EAST = {"ATL", "BOS", "BKN", "CHA", "CHI", "CLE", "DET", "IND", "MIA", "MIL", "NYK", "ORL", "PHI", "TOR", "WAS"}
+WEST = {"DAL", "DEN", "GSW", "HOU", "LAC", "LAL", "MEM", "MIN", "NOP", "OKC", "PHX", "POR", "SAC", "SAS", "UTA"}
 
 # ---------- Sidebar ----------
 season = st.sidebar.selectbox("Season", ["2026-27", "2025-26", "2024-25", "2023-24"], index=1)
@@ -36,8 +40,26 @@ for c in STATS:
 dmin, dmax = raw["GAME_DATE"].min().date(), raw["GAME_DATE"].max().date()
 span = st.sidebar.date_input("Games between", (dmin, dmax), min_value=dmin, max_value=dmax)
 last_n = st.sidebar.selectbox("Games per team", ["All", "Last 5", "Last 10", "Last 20"])
+conf = st.sidebar.radio("Conference", ["All teams", "Eastern", "Western"])
+
+# Current NBA rank: win % across the whole season, ties broken by point differential
+if "PLUS_MINUS" not in raw.columns:
+    raw["PLUS_MINUS"] = 0
+raw["PLUS_MINUS"] = pd.to_numeric(raw["PLUS_MINUS"], errors="coerce").fillna(0)
+stand = raw.groupby("TEAM_ABBREVIATION").agg(
+    W=("WL", lambda x: (x == "W").sum()), G=("WL", "size"), Diff=("PLUS_MINUS", "sum")).reset_index()
+stand["L"] = stand["G"] - stand["W"]
+stand["WinPct"] = stand["W"] / stand["G"]
+stand = stand.sort_values(["WinPct", "Diff"], ascending=False).reset_index(drop=True)
+stand["NBA Rank"] = stand.index + 1
+stand["W-L"] = stand["W"].astype(str) + "-" + stand["L"].astype(str)
+stand = stand.rename(columns={"TEAM_ABBREVIATION": "Team"})[["Team", "NBA Rank", "W-L"]]
 
 df = raw.copy()
+if conf == "Eastern":
+    df = df[df["TEAM_ABBREVIATION"].isin(EAST)]
+elif conf == "Western":
+    df = df[df["TEAM_ABBREVIATION"].isin(WEST)]
 if isinstance(span, tuple) and len(span) == 2:
     df = df[(df["GAME_DATE"].dt.date >= span[0]) & (df["GAME_DATE"].dt.date <= span[1])]
 if last_n != "All":
@@ -64,6 +86,7 @@ tot["FG%"] = pct(tot["FGM"], tot["FGA"])
 tot["3P%"] = pct(tot["FG3M"], tot["FG3A"])
 tot["FT%"] = pct(tot["FTM"], tot["FTA"])
 tot = tot.rename(columns={"TEAM_ABBREVIATION": "Team", "FG3M": "3PM", "FG3A": "3PA"})
+tot = tot.merge(stand, on="Team", how="left")
 
 has_shooting = df["FGA"].notna().any()
 if not has_shooting:
@@ -72,11 +95,11 @@ if not has_shooting:
 tab1, tab2, tab3 = st.tabs(["Team table", "Leaders", "Cumulative trend"])
 
 with tab1:
-    cols = ["Team", "GP", "PTS", "PPG"]
+    cols = ["NBA Rank", "Team", "W-L", "GP", "PTS", "PPG"]
     if has_shooting:
         cols += ["FGM", "FGA", "FG%", "3PM", "3PA", "3P%", "FTM", "FTA", "FT%"]
     show = tot[cols].sort_values("PTS", ascending=False).reset_index(drop=True)
-    show.insert(0, "Rank", show.index + 1)
+    show.insert(0, "Sr. no.", show.index + 1)
     st.dataframe(show.round(1), hide_index=True, width="stretch")
 
 with tab2:
