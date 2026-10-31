@@ -56,6 +56,68 @@ def compute(df, cap, min_games):
     return w
 
 
+def last_game_card(df):
+    """Show the most recent game in the data: teams, score, date and tip-off time."""
+    df = df.dropna(subset=["GAME_DATE"])
+    last_day = df["GAME_DATE"].max()
+    day = df[df["GAME_DATE"] == last_day].copy()
+    day["_t"] = pd.to_datetime(day["GAME_TIME"], utc=True, errors="coerce") if "GAME_TIME" in day.columns else pd.NaT
+
+    def home_flag(r):
+        if "HOME" in day.columns and pd.notna(r.get("HOME")):
+            return str(r["HOME"]).lower() == "true"
+        if "MATCHUP" in day.columns and isinstance(r.get("MATCHUP"), str):
+            return "@" not in r["MATCHUP"]
+        return None
+
+    games = []
+    if "GAME_ID" in day.columns:
+        for _, g in day.groupby("GAME_ID"):
+            if len(g) != 2:
+                continue
+            a, b = g.iloc[0], g.iloc[1]
+            ha, hb = home_flag(a), home_flag(b)
+            home, away = (b, a) if (ha is False or hb is True) else (a, b)
+            if ha is None and hb is None:
+                home, away = a, b   # home/away unknown: keep order
+            games.append(dict(home=home["TEAM_ABBREVIATION"], away=away["TEAM_ABBREVIATION"],
+                              home_pts=home["PTS"], away_pts=away["PTS"], t=g["_t"].iloc[0],
+                              known=not (ha is None and hb is None)))
+    st.subheader("🕒 Last game in the data")
+    if not games:
+        st.write(f"Latest date: **{last_day:%a, %d %b %Y}**. Teams: " + ", ".join(sorted(day["TEAM_ABBREVIATION"])))
+        return
+
+    def fmt(g):
+        sep = "@" if g["known"] else "vs"
+        return f"{g['away']} {g['away_pts']:.0f} {sep} {g['home']} {g['home_pts']:.0f}"
+
+    has_time = any(pd.notna(g["t"]) for g in games)
+    games.sort(key=lambda g: g["t"] if pd.notna(g["t"]) else pd.Timestamp.min.tz_localize("UTC"))
+    latest = games[-1]
+    with st.container(border=True):
+        if has_time and pd.notna(latest["t"]):
+            ist, et = latest["t"].tz_convert("Asia/Kolkata"), latest["t"].tz_convert("America/New_York")
+            winner = latest["home"] if latest["home_pts"] > latest["away_pts"] else latest["away"]
+            margin = abs(latest["home_pts"] - latest["away_pts"])
+            st.markdown(f"### {fmt(latest)}")
+            st.write(f"**Final**, {winner} won by {margin:.0f}")
+            c1, c2 = st.columns(2)
+            c1.metric("Game date (US)", f"{last_day:%a, %d %b %Y}")
+            c2.metric("Tip-off", f"{ist:%I:%M %p}".lstrip("0") + " IST",
+                      f"{ist:%a %d %b} IST  |  " + f"{et:%I:%M %p}".lstrip("0") + " ET", delta_color="off")
+        else:
+            st.markdown(f"**Latest game day: {last_day:%a, %d %b %Y}** ({len(games)} games)")
+            for g in games:
+                st.write("• " + fmt(g))
+            st.caption("Tip-off times aren't stored for this season's data, so I can't tell which game was last.")
+    if has_time and len(games) > 1:
+        with st.expander(f"All {len(games)} games on {last_day:%d %b %Y}"):
+            tbl = pd.DataFrame([{"Game": fmt(g), "Tip-off (IST)": (g["t"].tz_convert("Asia/Kolkata").strftime("%I:%M %p")
+                                                                   if pd.notna(g["t"]) else "n/a")} for g in games])
+            st.dataframe(tbl, hide_index=True, width="stretch")
+
+
 try:
     raw = load(season)
 except Exception as e:
@@ -65,6 +127,8 @@ except Exception as e:
 if raw.empty:
     st.warning("No games for this season yet. Try an earlier season.")
     st.stop()
+
+last_game_card(raw)
 
 wk = compute(raw, cap, min_games)
 if wk.empty:
