@@ -26,7 +26,7 @@ start = START
 if not old.empty:
     last = pd.to_datetime(old["GAME_DATE"]).max().date()
     start = max(START, last - timedelta(days=3))
-    if all(c in old.columns for c in ("FGA", "STL")):
+    if all(c in old.columns for c in ("FGA", "STL", "GAME_TIME")):
         missing = old[old["FGA"].isna() | old["STL"].isna()]
         if not missing.empty:
             start = min(start, pd.to_datetime(missing["GAME_DATE"]).min().date())
@@ -107,7 +107,8 @@ def parse(data):
             margin = scores[ab] - scores[opp]
             row = {"TEAM_ABBREVIATION": FIX.get(ab, ab), "GAME_DATE": gdate.isoformat(),
                    "PLUS_MINUS": margin, "WL": "W" if margin > 0 else "L",
-                   "PTS": scores[ab], "OPP_PTS": scores[opp], "GAME_ID": ev["id"]}
+                   "PTS": scores[ab], "OPP_PTS": scores[opp], "GAME_ID": ev["id"],
+                   "GAME_TIME": ev["date"], "HOME": t.get("homeAway") == "home"}
             row.update({k: box.get(ab, {}).get(k) for k in SHOOT})
             rows.append(row)
     return rows
